@@ -1,0 +1,32 @@
+{
+  "serverUrl": "https://api.example.com",
+  "agentToken": "DAN-TOKEN-TAI-ADMIN-VAO-DAY",
+  "pollWaitSeconds": 20,
+  "heartbeatSeconds": 15,
+  "maxJobAgeMinutes": 15,
+  "dataDir": "./data",
+  "logDir": "./logs",
+  "printers": [
+    {
+      "id": "UUID-MAY-IN-BEP",
+      "name": "Máy in Bếp",
+      "station": "KITCHEN",
+      "host": "192.168.1.50",
+      "port": 9100,
+      "width": 80,
+      "encoding": "raster",
+      "cutMode": "partial"
+    },
+    {
+      "id": "UUID-MAY-IN-QUAY",
+      "name": "Máy in Quầy (bill)",
+      "station": "CASHIER",
+      "host": "192.168.1.51",
+      "port": 9100,
+      "width": 58,
+      "encoding": "raster",
+      "drawer": true,
+      "drawerPin": 0
+    }
+  ]
+}

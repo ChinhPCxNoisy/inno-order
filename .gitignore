@@ -1,0 +1,20 @@
+node_modules/
+dist/
+build/
+coverage/
+*.log
+.env
+.env.local
+.env.*.local
+.DS_Store
+.idea/
+.vscode/
+*.tsbuildinfo
+prisma/*.db
+apps/api/uploads/
+
+# Khong dua len repo cong khai
+/Email*.txt
+*.pid
+docs/review/
+.claude/scheduled_tasks.lock

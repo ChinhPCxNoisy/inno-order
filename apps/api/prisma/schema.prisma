@@ -1,0 +1,959 @@
+// InnoOrder - Data Model MVP (theo BRD section 11)
+// 1 nen tang - nhieu quan (multi-tenant, tach biet theo store_id)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ ENUMS ============
+
+enum StoreStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum TableStatus {
+  AVAILABLE
+  OCCUPIED
+  NEED_CLEAN
+  CLEANED
+  RESERVED
+  LOCKED
+}
+
+enum OrderStatus {
+  PENDING
+  ACCEPTED
+  PREPARING
+  READY
+  COMPLETED
+  CANCELLED
+  REFUNDED
+  PARTIAL_REFUND
+}
+
+enum OrderItemStatus {
+  PENDING
+  ACCEPTED
+  PREPARING
+  READY
+  SERVED
+  CANCELLED
+}
+
+enum OrderSource {
+  QR
+  POS
+  ADMIN
+}
+
+enum PaymentMethod {
+  CASH
+  TRANSFER
+  QR_BANK
+  CARD
+  WALLET
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  REFUNDED
+  FAILED
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  OWNER
+  MANAGER
+  CASHIER
+  WAITER
+  KITCHEN
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum PrinterStation {
+  KITCHEN
+  BAR
+  CASHIER
+}
+
+enum PrinterConnection {
+  USB
+  LAN
+  WIFI
+  BLUETOOTH
+}
+
+enum PaperSize {
+  P58
+  P80
+}
+
+enum PrinterStatus {
+  ONLINE
+  OFFLINE
+  ERROR
+}
+
+enum PrintJobType {
+  KITCHEN_TICKET
+  BILL
+  REPRINT
+  CANCEL
+  TEST
+  PRE_BILL
+  TABLE_MOVE
+  DRAWER
+}
+
+// Khu in cua danh muc/mon (NONE = khong in)
+enum TicketStation {
+  KITCHEN
+  BAR
+  NONE
+}
+
+// Kieu in chu tieng Viet cua may in
+enum PrinterEncoding {
+  RASTER
+  CP1258
+  ASCII
+}
+
+enum PrintJobStatus {
+  PENDING
+  SENT
+  PRINTED
+  FAILED
+  CANCELLED
+}
+
+enum TableSessionStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
+enum BillStatus {
+  OPEN
+  PARTIALLY_PAID
+  PAID
+  VOID
+  REFUNDED
+}
+
+enum DiscountKind {
+  MANUAL
+  VOUCHER
+  POINTS
+}
+
+enum PaymentIntentStatus {
+  PENDING
+  PAID
+  PARTIALLY_PAID
+  EXPIRED
+  CANCELLED
+  SUPERSEDED
+}
+
+enum BankTxnDirection {
+  IN
+  OUT
+}
+
+enum BankTxnStatus {
+  RECEIVED
+  MATCHED
+  PARTIAL
+  OVERPAID
+  UNMATCHED
+  DUPLICATE_PAYMENT
+  LATE_CLOSED
+  NEEDS_REVIEW
+  REFUND_PENDING
+  REFUNDED
+  IGNORED
+}
+
+enum OfferType {
+  PERCENT
+  AMOUNT
+}
+
+enum OfferRedemptionStatus {
+  RESERVED
+  CONSUMED
+  RELEASED
+}
+
+enum CustomerStatus {
+  ACTIVE
+  BLOCKED
+  DELETED
+}
+
+// ============ TENANT: QUAN ============
+
+model Store {
+  id        String      @id @default(uuid(7)) @db.Uuid
+  name      String
+  slug      String      @unique
+  logoUrl   String?
+  phone     String?
+  address   String?
+  status    StoreStatus @default(ACTIVE)
+  // Cau hinh quan: rounding, VAT, khung gio mo cua, mau header...
+  settings  Json        @default("{}")
+  // Module tra phi duoc Super Admin bat cho quan (vd: "staff_rating")
+  enabledModules String[] @default([])
+  // Bo dem so don (nguyen tu, tang bang update increment): so don cuoi cung da cap
+  orderSeq  Int         @default(1000)
+  // Bo dem so hoa don ban (nguyen tu, giong orderSeq): so hoa don cuoi cung da cap
+  billSeq   Int         @default(0)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  areas       Area[]
+  tables      Table[]
+  categories  MenuCategory[]
+  menuItems   MenuItem[]
+  menuOptions MenuOption[]
+  orders      Order[]
+  payments    Payment[]
+  users       User[]
+  printers    Printer[]
+  printJobs   PrintJob[]
+  customers   Customer[]
+  auditLogs   AuditLog[]
+  reviews     OrderReview[]
+  tableCallRequests TableCallRequest[]
+  tableSessions TableSession[]
+  bills       Bill[]
+  printAgents PrintAgent[]
+  paymentAccounts PaymentAccount[]
+  paymentIntents  PaymentIntent[]
+  bankTransactions BankTransaction[]
+  offers      Offer[]
+  offerRedemptions OfferRedemption[]
+
+  @@map("stores")
+}
+
+// ============ BAN ============
+
+model Area {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  storeId   String   @db.Uuid
+  name      String // Trong nha, ngoai troi...
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  store  Store   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  tables Table[]
+
+  @@index([storeId])
+  @@map("areas")
+}
+
+model Table {
+  id        String      @id @default(uuid(7)) @db.Uuid
+  storeId   String      @db.Uuid
+  areaId    String      @db.Uuid
+  code      String // B01, B02...
+  name      String? // Ban 1
+  seats     Int?
+  status    TableStatus @default(AVAILABLE)
+  // Link QR: {QR_BASE_URL}/s/{store_slug}/t/{code}
+  qrCode    String?
+  notes     String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  store  Store   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  area   Area    @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  orders Order[]
+  callRequests TableCallRequest[]
+  sessionsAsPrimary TableSession[] @relation("SessionPrimaryTable")
+  sessionTables TableSessionTable[]
+
+  @@unique([storeId, code])
+  @@index([storeId, status])
+  @@map("tables")
+}
+
+// ============ MENU ============
+
+model MenuCategory {
+  id        String  @id @default(uuid(7)) @db.Uuid
+  storeId   String  @db.Uuid
+  name      String
+  sortOrder Int     @default(0)
+  active    Boolean @default(true)
+  // Khu in phieu cua danh muc (mon co the ghi de bang MenuItem.printStation)
+  station   TicketStation @default(KITCHEN)
+
+  store  Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  items  MenuItem[]
+
+  @@index([storeId])
+  @@map("menu_categories")
+}
+
+model MenuItem {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  storeId         String   @db.Uuid
+  // null = theo danh muc
+  printStation    TicketStation?
+  categoryId      String   @db.Uuid
+  name            String
+  description     String?
+  imageUrl        String?
+  price           Decimal  @db.Decimal(12, 2)
+  active          Boolean  @default(true)
+  prepTimeMinutes Int?
+  sortOrder       Int      @default(0)
+  // Tag: ban_chay, moi, giam_gia...
+  tags            Json     @default("[]")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  store     Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  category  MenuCategory  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  options   MenuOption[]
+  orderItems OrderItem[]
+
+  @@index([storeId, active])
+  @@index([categoryId])
+  @@map("menu_items")
+}
+
+// Tuy chon mon: size, do ngot, do cay, topping...
+model MenuOption {
+  id          String  @id @default(uuid(7)) @db.Uuid
+  storeId     String  @db.Uuid
+  menuItemId  String  @db.Uuid
+  groupName   String // Size, Do ngot, Do cay
+  optionName  String // Nho, Vua, Lon / 0%, 25%, 50%...
+  extraPrice  Decimal @default(0) @db.Decimal(12, 2)
+  isRequired  Boolean @default(false)
+  sortOrder   Int     @default(0)
+
+  store    Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@index([menuItemId])
+  @@map("menu_options")
+}
+
+// ============ DON HANG ============
+
+model Order {
+  id             String      @id @default(uuid(7)) @db.Uuid
+  storeId        String      @db.Uuid
+  tableId        String      @db.Uuid
+  orderNumber    String // So don hien thi: 1001, 1002...
+  status         OrderStatus @default(PENDING)
+  subtotal       Decimal     @default(0) @db.Decimal(14, 2)
+  discountAmount Decimal     @default(0) @db.Decimal(14, 2)
+  vatAmount      Decimal     @default(0) @db.Decimal(14, 2)
+  totalAmount    Decimal     @default(0) @db.Decimal(14, 2)
+  customerNote   String?
+  source         OrderSource
+  customerId     String?     @db.Uuid
+  // Khoa chong gui trung tu client (tuy chon), duy nhat theo quan
+  clientRequestId String?    @db.VarChar(64)
+  // Phien ban + hoa don ban (tableId van la ban vat ly can mang mon den)
+  sessionId      String?     @db.Uuid
+  billId         String?     @db.Uuid
+  // Ma uu dai khach khai bao o gio (chi luu, KHONG tu ap giam gia; quan xac nhan khi thanh toan)
+  voucherCode    String?     @db.VarChar(40)
+  createdAt      DateTime    @default(now())
+  paidAt         DateTime?
+  completedAt    DateTime?
+
+  store      Store        @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  table      Table        @relation(fields: [tableId], references: [id], onDelete: Restrict)
+  customer   Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items      OrderItem[]
+  payments   Payment[]
+  printJobs  PrintJob[]
+  review     OrderReview?
+  session    TableSession? @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  bill       Bill?        @relation(fields: [billId], references: [id], onDelete: SetNull)
+
+  @@unique([storeId, orderNumber])
+  @@unique([storeId, clientRequestId])
+  @@index([storeId, createdAt])
+  @@index([storeId, status])
+  @@index([tableId, status])
+  @@index([sessionId])
+  @@index([billId])
+  @@map("orders")
+}
+
+model OrderItem {
+  id           String          @id @default(uuid(7)) @db.Uuid
+  orderId      String          @db.Uuid
+  menuItemId   String          @db.Uuid
+  // Snapshot de order khong thay doi khi menu doi (BRD 10.2)
+  nameSnapshot String
+  priceSnapshot Decimal        @db.Decimal(12, 2)
+  quantity     Int
+  totalAmount  Decimal         @db.Decimal(14, 2)
+  note         String?
+  status       OrderItemStatus @default(PENDING)
+  // Nhan vien bam "Da mang ra ban" (dung de thuong theo so luong phuc vu + goi y nhan vien duoc danh gia)
+  servedByUserId String?       @db.Uuid
+  createdAt    DateTime        @default(now())
+
+  order    Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem MenuItem          @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
+  servedBy User?             @relation(fields: [servedByUserId], references: [id], onDelete: SetNull)
+  options  OrderItemOption[]
+
+  @@index([orderId])
+  @@index([status])
+  @@index([servedByUserId])
+  @@map("order_items")
+}
+
+model OrderItemOption {
+  id           String  @id @default(uuid(7)) @db.Uuid
+  orderItemId  String  @db.Uuid
+  optionGroup  String
+  optionValue  String
+  extraPrice   Decimal @default(0) @db.Decimal(12, 2)
+
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  @@index([orderItemId])
+  @@map("order_item_options")
+}
+
+// ============ THANH TOAN ============
+
+model Payment {
+  id         String        @id @default(uuid(7)) @db.Uuid
+  storeId    String        @db.Uuid
+  // Thanh toan cu theo don co orderId; thanh toan theo hoa don ban co billId (orderId = null)
+  orderId    String?       @db.Uuid
+  billId     String?       @db.Uuid
+  amount     Decimal       @db.Decimal(14, 2)
+  method     PaymentMethod
+  status     PaymentStatus @default(COMPLETED)
+  paidAt     DateTime      @default(now())
+  cashierId  String?       @db.Uuid
+  receiptNo  String?
+  // Chi tiet chia bill: {mode: EVEN|ITEMS, ...}
+  allocation Json?
+  payerLabel String?
+  // Khoa chong thanh toan trung do client gui, duy nhat theo quan
+  idempotencyKey String?   @db.VarChar(64)
+  cashReceived Decimal?    @db.Decimal(14, 2)
+  // Payment hoan tien tro toi payment goc
+  refundOfPaymentId String? @db.Uuid
+  // Thanh toan QR: intent + giao dich ngan hang (moi giao dich ngan hang toi da 1 Payment)
+  intentId      String?   @db.Uuid
+  bankTransactionId String? @unique @db.Uuid
+  // CASHIER | BANK_FEED | SYSTEM
+  confirmedBy   String    @default("CASHIER")
+  // Chi cho Payment hoan khong phai tien mat: PENDING_TRANSFER | DONE
+  refundStatus  String?
+  refundNote    String?
+
+  store Store  @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  order Order? @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  bill  Bill?  @relation(fields: [billId], references: [id], onDelete: Restrict)
+
+  @@unique([storeId, idempotencyKey])
+  @@index([storeId, paidAt])
+  @@index([orderId])
+  @@index([billId])
+  @@map("payments")
+}
+
+// ============ PHIEN BAN + HOA DON BAN ============
+
+// Phien ban: khoang thoi gian mot nhom khach dung mot hoac nhieu ban. Moi don/dot goi them thuoc cung phien.
+model TableSession {
+  id             String             @id @default(uuid(7)) @db.Uuid
+  storeId        String             @db.Uuid
+  primaryTableId String             @db.Uuid
+  status         TableSessionStatus @default(OPEN)
+  // 128 bit ngau nhien (hex 32): khach dung de nhan dien phien, khong doan duoc
+  publicToken    String             @unique
+  openedAt       DateTime           @default(now())
+  closedAt       DateTime?
+  openedByUserId String?            @db.Uuid
+  openedVia      String             @default("QR") // QR | POS | BACKFILL
+  guestCount     Int?
+  mergedIntoId   String?            @db.Uuid
+  note           String?
+
+  store        Store               @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  primaryTable Table               @relation("SessionPrimaryTable", fields: [primaryTableId], references: [id], onDelete: Restrict)
+  tables       TableSessionTable[]
+  orders       Order[]
+  bill         Bill?
+
+  @@index([storeId, status])
+  @@index([primaryTableId, status])
+  @@map("table_sessions")
+}
+
+// Cac ban vat ly thuoc phien (gop ban) va lich su doi ban
+model TableSessionTable {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  sessionId String    @db.Uuid
+  tableId   String    @db.Uuid
+  role      String    @default("PRIMARY") // PRIMARY | MERGED | MOVED_FROM
+  joinedAt  DateTime  @default(now())
+  leftAt    DateTime?
+
+  session TableSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  table   Table        @relation(fields: [tableId], references: [id], onDelete: Restrict)
+
+  @@index([sessionId])
+  @@index([tableId, leftAt])
+  @@map("table_session_tables")
+}
+
+// Hoa don ban: 1-1 voi phien, gom moi mon chua huy cua moi don trong phien
+model Bill {
+  id             String     @id @default(uuid(7)) @db.Uuid
+  storeId        String     @db.Uuid
+  sessionId      String     @unique @db.Uuid
+  billNo         String
+  status         BillStatus @default(OPEN)
+  subtotal       Decimal    @default(0) @db.Decimal(14, 2)
+  discountAmount Decimal    @default(0) @db.Decimal(14, 2)
+  vatAmount      Decimal    @default(0) @db.Decimal(14, 2)
+  totalAmount    Decimal    @default(0) @db.Decimal(14, 2)
+  paidAmount     Decimal    @default(0) @db.Decimal(14, 2)
+  // Tang moi lan tong doi (de bao client/QR cu)
+  version        Int        @default(1)
+  closedByUserId String?    @db.Uuid
+  paidAt         DateTime?
+  refundedAt     DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  store     Store          @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  session   TableSession   @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  discounts BillDiscount[]
+  payments  Payment[]
+  intents   PaymentIntent[]
+  orders    Order[]
+
+  @@unique([storeId, billNo])
+  @@index([storeId, status])
+  @@map("bills")
+}
+
+model BillDiscount {
+  id               String       @id @default(uuid(7)) @db.Uuid
+  billId           String       @db.Uuid
+  kind             DiscountKind @default(MANUAL)
+  // So tien da quy doi (voi giam theo % thi tinh lai khi tam tinh doi)
+  amount           Decimal      @db.Decimal(14, 2)
+  percent          Decimal?     @db.Decimal(5, 2)
+  reason           String?
+  createdByUserId  String?      @db.Uuid
+  approvedByUserId String?      @db.Uuid
+  // Giam gia tu uu dai (kind = VOUCHER)
+  offerId          String?      @db.Uuid
+  createdAt        DateTime     @default(now())
+
+  bill Bill @relation(fields: [billId], references: [id], onDelete: Cascade)
+
+  @@index([billId])
+  @@map("bill_discounts")
+}
+
+// ============ USERS & PHAN QUYEN ============
+
+model User {
+  id           String     @id @default(uuid(7)) @db.Uuid
+  storeId      String?    @db.Uuid // null = Super Admin (InnoCom)
+  name         String
+  phone        String?
+  email        String?
+  passwordHash String
+  role         UserRole
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  store Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  servedItems OrderItem[]
+  reviewsReceived OrderReview[]
+  resolvedTableCalls TableCallRequest[]
+
+  @@unique([storeId, email])
+  @@unique([storeId, phone])
+  @@index([storeId])
+  @@map("users")
+}
+
+// ============ MAY IN ============
+
+model Printer {
+  id           String            @id @default(uuid(7)) @db.Uuid
+  storeId      String            @db.Uuid
+  name         String
+  station      PrinterStation
+  connection   PrinterConnection
+  host         String? // IP cho LAN/WIFI
+  port         Int?              @default(9100)
+  deviceName   String? // Ten thiet bi cho USB
+  paperSize    PaperSize         @default(P80)
+  charsPerLine Int               @default(42)
+  cutAtEnd     Boolean           @default(true)
+  status       PrinterStatus     @default(OFFLINE)
+  lastSeenAt   DateTime?
+  createdAt    DateTime          @default(now())
+  // May in do Print Agent nao quan ly (chi agent do moi nhan duoc job cua may in nay)
+  agentId      String?           @db.Uuid
+  enabled      Boolean           @default(true)
+  // Nho hon = uu tien hon trong cung khu
+  priority     Int               @default(0)
+  statusDetail String?
+  encoding     PrinterEncoding   @default(RASTER)
+  codePage     Int?
+  openDrawer   Boolean           @default(false)
+
+  store  Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  agent  PrintAgent? @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  jobs   PrintJob[]
+
+  @@index([storeId])
+  @@map("printers")
+}
+
+model PrintJob {
+  id           String         @id @default(uuid(7)) @db.Uuid
+  storeId      String         @db.Uuid
+  printerId    String?        @db.Uuid
+  orderId      String?        @db.Uuid
+  jobType      PrintJobType
+  status       PrintJobStatus @default(PENDING)
+  content      String? // No dung ESC/POS
+  attemptCount Int            @default(0)
+  createdAt    DateTime       @default(now())
+  sentAt       DateTime?
+  printedAt    DateTime?
+  failedReason String?
+  // Tai lieu in co cau truc (xem apps/print-agent/PROTOCOL.md); content giu ban van ban de xem nhanh
+  payload      Json?
+  // Chong tao trung job: duy nhat theo quan (NULL duoc lap lai)
+  dedupeKey    String?
+  agentId      String?        @db.Uuid
+  maxAttempts  Int            @default(3)
+  nextAttemptAt DateTime?
+  leaseUntil   DateTime?
+  lastError    String?
+  errorCode    String?
+  copies       Int            @default(1)
+  openDrawer   Boolean        @default(false)
+  billId       String?        @db.Uuid
+  // Nhan vien da bao bep bang mieng / xu ly (tat canh bao)
+  acknowledgedAt DateTime?
+  acknowledgedByUserId String? @db.Uuid
+
+  store   Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  printer Printer? @relation(fields: [printerId], references: [id], onDelete: SetNull)
+  order   Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  agent   PrintAgent? @relation(fields: [agentId], references: [id], onDelete: SetNull)
+
+  @@unique([storeId, dedupeKey])
+  @@index([storeId, status, createdAt])
+  @@index([printerId, status])
+  @@index([status, nextAttemptAt])
+  @@map("print_jobs")
+}
+
+// Chuong trinh Print Agent chay o may quay; xac thuc bang token (chi luu bam SHA-256)
+model PrintAgent {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  storeId    String    @db.Uuid
+  name       String
+  tokenHash  String    @unique
+  version    String?
+  lastSeenAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  store    Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  printers Printer[]
+  jobs     PrintJob[]
+
+  @@index([storeId])
+  @@map("print_agents")
+}
+
+// ============ KHACH HANG (CRM co ban) ============
+
+model Customer {
+  id                       String        @id @default(uuid(7)) @db.Uuid
+  storeId                  String        @db.Uuid
+  phone                    String?
+  name                     String?
+  zaloUserId               String?
+  totalOrders              Int           @default(0)
+  totalSpent               Decimal       @default(0) @db.Decimal(14, 2)
+  lastVisitAt              DateTime?
+  marketingConsent         Boolean       @default(false)
+  transactionalConsent     Boolean       @default(false)
+  consentDate              DateTime?
+  status                   CustomerStatus @default(ACTIVE)
+  createdAt                DateTime      @default(now())
+
+  store  Store   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  orders Order[]
+
+  @@unique([storeId, phone])
+  @@index([storeId, zaloUserId])
+  @@map("customers")
+}
+
+// ============ DANH GIA SAU THANH TOAN (module "staff_rating") ============
+
+model OrderReview {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  storeId   String   @db.Uuid
+  orderId   String   @unique @db.Uuid // 1 don chi duoc danh gia 1 lan
+  rating    Int // 1-5
+  comment   String?
+  // Tag nhanh khach chon de mo ta ly do danh gia (vd: "Thân thiện", "Phục vụ chậm")
+  tags      Json     @default("[]")
+  // Nhan vien phuc vu chinh, suy ra tu servedByUserId cua cac mon trong don (BRD module staff_rating)
+  staffId   String?  @db.Uuid
+  // Dinh danh Zalo cua nguoi gui danh gia (zmp-sdk getUserID, qua dang nhap Zalo that trong mini app).
+  // Null neu khach khong dang nhap Zalo. Dung de phat hien gian lan: nhieu danh gia cung
+  // zaloUserId tai 1 quan trong thoi gian ngan la dau hieu bat thuong (BRD module staff_rating).
+  zaloUserId String?
+  createdAt DateTime @default(now())
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  staff User? @relation(fields: [staffId], references: [id], onDelete: SetNull)
+
+  @@index([storeId, createdAt])
+  @@index([staffId])
+  @@index([zaloUserId])
+  @@map("order_reviews")
+}
+
+// ============ GOI NHAN VIEN ============
+
+/** Khach bam "Goi nhan vien" tai ban — bao realtime cho nhan vien quan */
+model TableCallRequest {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  storeId    String    @db.Uuid
+  tableId    String    @db.Uuid
+  status     String    @default("PENDING") // PENDING | RESOLVED
+  reason     String?   // CALL_STAFF | WATER | TOOLS | BILL (null = goi nhan vien chung)
+  note       String?
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+  resolvedByUserId String? @db.Uuid
+
+  store      Store @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  table      Table @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  resolvedBy User? @relation(fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([storeId, status])
+  @@map("table_call_requests")
+}
+
+// ============ AUDIT LOG ============
+
+model AuditLog {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  storeId    String?  @db.Uuid
+  userId     String?  @db.Uuid
+  action     String // doi_gia, tat_mon, hoan_tien, huy_don, in_lai, doi_ban, login...
+  entityType String // Order, MenuItem, Table, User...
+  entityId   String?
+  beforeData Json?
+  afterData  Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  store Store? @relation(fields: [storeId], references: [id], onDelete: SetNull)
+
+  @@index([storeId, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+// ============ THANH TOAN QR (VietQR) ============
+
+// Tai khoan nhan tien THEO QUAN. Khoa API/bi mat webhook luon duoc ma hoa, khong bao gio tra ra API.
+model PaymentAccount {
+  id               String    @id @default(uuid(7)) @db.Uuid
+  storeId          String    @db.Uuid
+  label            String
+  bankBin          String    @db.VarChar(6)
+  bankName         String
+  accountNumber    String
+  accountName      String
+  // Khoa adaptor bien dong so du: MANUAL | MOCK | ...
+  provider         String    @default("MANUAL")
+  providerConfigEnc String?
+  // 32 byte ngau nhien (base64url) nam trong URL webhook
+  webhookToken     String    @unique
+  webhookSecretEnc String?
+  isActive         Boolean   @default(true)
+  isDefault        Boolean   @default(false)
+  verifiedAt       DateTime?
+  lastWebhookAt    DateTime?
+  createdByUserId  String?   @db.Uuid
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  store   Store             @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  intents PaymentIntent[]
+  txns    BankTransaction[]
+
+  @@unique([storeId, bankBin, accountNumber])
+  @@index([storeId, isActive])
+  @@map("payment_accounts")
+}
+
+model PaymentIntent {
+  id              String              @id @default(uuid(7)) @db.Uuid
+  storeId         String              @db.Uuid
+  accountId       String              @db.Uuid
+  billId          String              @db.Uuid
+  // Ma doi soat duy nhat toan nen tang: IO + 8 ky tu Crockford base32
+  code            String              @unique
+  amount          Decimal             @db.Decimal(14, 2)
+  paidAmount      Decimal             @default(0) @db.Decimal(14, 2)
+  status          PaymentIntentStatus @default(PENDING)
+  qrPayload       String
+  expiresAt       DateTime
+  paidAt          DateTime?
+  createdByUserId String?             @db.Uuid
+  createdByCustomer Boolean           @default(false)
+  createdAt       DateTime            @default(now())
+
+  store   Store          @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  account PaymentAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  bill    Bill           @relation(fields: [billId], references: [id], onDelete: Restrict)
+
+  @@index([storeId, status, expiresAt])
+  @@index([billId, status])
+  @@map("payment_intents")
+}
+
+// So giao dich ngan hang: ghi TRUOC khi khop, idempotent theo (accountId, providerTxnId)
+model BankTransaction {
+  id               String          @id @default(uuid(7)) @db.Uuid
+  storeId          String          @db.Uuid
+  accountId        String          @db.Uuid
+  provider         String
+  providerTxnId    String
+  direction        BankTxnDirection @default(IN)
+  amount           Decimal         @db.Decimal(14, 2)
+  content          String
+  // Bo dau, in hoa, chi chu-so
+  contentNormalized String
+  bankReference    String?
+  counterpartyName String?
+  counterpartyAccountMasked String?
+  transferredAt    DateTime
+  receivedAt       DateTime        @default(now())
+  rawPayload       Json
+  status           BankTxnStatus   @default(RECEIVED)
+  intentId         String?         @db.Uuid
+  billId           String?         @db.Uuid
+  appliedAmount    Decimal         @default(0) @db.Decimal(14, 2)
+  excessAmount     Decimal         @default(0) @db.Decimal(14, 2)
+  resolvedByUserId String?         @db.Uuid
+  resolvedAt       DateTime?
+  resolutionNote   String?
+
+  store   Store          @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  account PaymentAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@unique([accountId, providerTxnId])
+  @@index([storeId, status, receivedAt])
+  @@index([storeId, transferredAt])
+  @@map("bank_transactions")
+}
+
+// ============ UU DAI (MOC A) ============
+
+// Uu dai cong khai dung ma chung (khong can danh tinh khach). Quan ap thu cong tai quay.
+model Offer {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  storeId     String    @db.Uuid
+  // Ma cong khai, in hoa, duy nhat theo quan
+  code        String
+  tagline     String?
+  headline    String
+  subtitle    String?
+  description String?
+  discountType OfferType
+  value       Decimal   @db.Decimal(14, 2)
+  maxDiscount Decimal?  @db.Decimal(14, 2)
+  minSubtotal Decimal   @default(0) @db.Decimal(14, 2)
+  startsAt    DateTime
+  endsAt      DateTime?
+  totalLimit  Int?
+  // So luot RESERVED + CONSUMED
+  usedCount   Int       @default(0)
+  stackable   Boolean   @default(false)
+  // Hien trong danh sach cong khai cua mini app
+  listed      Boolean   @default(true)
+  active      Boolean   @default(true)
+  cashierCanApply Boolean @default(true)
+  extraTerms  Json      @default("[]")
+  createdByUserId String? @db.Uuid
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  store       Store             @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  redemptions OfferRedemption[]
+
+  @@unique([storeId, code])
+  @@index([storeId, active, endsAt])
+  @@map("offers")
+}
+
+model OfferRedemption {
+  id               String                @id @default(uuid(7)) @db.Uuid
+  storeId          String                @db.Uuid
+  offerId          String                @db.Uuid
+  billId           String                @db.Uuid
+  discountId       String?               @db.Uuid
+  amount           Decimal               @db.Decimal(14, 2)
+  status           OfferRedemptionStatus @default(RESERVED)
+  appliedByUserId  String?               @db.Uuid
+  overrideReason   String?
+  approvedByUserId String?               @db.Uuid
+  createdAt        DateTime              @default(now())
+  consumedAt       DateTime?
+  releasedAt       DateTime?
+
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  offer Offer @relation(fields: [offerId], references: [id], onDelete: Restrict)
+
+  // Mot uu dai chi ap dung mot lan tren mot hoa don
+  @@unique([offerId, billId])
+  @@index([storeId, offerId, status])
+  @@index([billId])
+  @@map("offer_redemptions")
+}

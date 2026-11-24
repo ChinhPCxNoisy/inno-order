@@ -1,0 +1,36 @@
+{
+  "name": "inno-order",
+  "version": "0.1.0",
+  "private": true,
+  "description": "InnoOrder - SaaS goi mon theo ban cho quan an (InnoCom)",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f",
+    "db:psql": "docker compose exec postgres psql -U innoorder innoorder",
+    "db:migrate": "npm run prisma:migrate -w @innoorder/api",
+    "db:deploy": "npm run prisma:deploy -w @innoorder/api",
+    "db:generate": "npm run prisma:generate -w @innoorder/api",
+    "db:seed": "npm run prisma:seed -w @innoorder/api",
+    "db:studio": "npm run prisma:studio -w @innoorder/api",
+    "dev": "npm run dev -w @innoorder/api",
+    "admin:dev": "npm run dev -w @innoorder/admin",
+    "admin:build": "npm run build -w @innoorder/admin",
+    "build": "npm run build -w @innoorder/api",
+    "start": "npm run start -w @innoorder/api",
+    "lint": "npm run lint -w @innoorder/api"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.3": true,
+    "prisma@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "esbuild@0.28.2": true,
+    "esbuild@0.25.12": true
+  }
+}

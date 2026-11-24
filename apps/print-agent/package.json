@@ -1,0 +1,30 @@
+{
+  "name": "@innoorder/print-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "InnoOrder Print Agent - chay tren may quay, lay job in tu server va gui ESC/POS toi may in LAN",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "tsx src/cli/agent.ts",
+    "once": "tsx src/cli/agent.ts --once",
+    "dry-run": "tsx src/cli/agent.ts --dry-run",
+    "test-print": "tsx src/cli/agent.ts --test-print",
+    "mock-server": "tsx src/cli/mock-server.ts",
+    "fake-printer": "tsx src/cli/fake-printer.ts",
+    "decode": "tsx src/cli/decode.ts",
+    "discover": "tsx src/cli/discover.ts",
+    "sample": "tsx src/cli/sample.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start:prod": "node dist/cli/agent.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"test/**/*.test.ts\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.3",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.0"
+  }
+}
